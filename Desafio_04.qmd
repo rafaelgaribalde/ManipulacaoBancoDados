@@ -1,0 +1,218 @@
+---
+title: "Desafio 04"
+author: "Miguel Fiorin (255540), Rafael Machado de Almeida Garibalde (277225)"
+format: html
+editor: visual
+---
+
+## 
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(leaflet)
+library(leaflet.minicharts)
+library(rio)
+
+```
+
+```{r}
+
+dataset_flights <- import('archive.zip', which = 'flights.csv')
+dataset_airports <- import("archive.zip",which = "airports.csv")
+
+```
+
+```{r}
+dataset_flights$DATE <- make_date(year = dataset_flights$YEAR, month = dataset_flights$MONTH, day = dataset_flights$DAY)
+
+dataset_flights<- dataset_flights %>%
+  relocate(DATE, DEPARTURE_TIME) %>%
+  select(-c(YEAR, MONTH, DAY))
+
+tabela_lat_long <- dataset_airports %>%
+  select("IATA_CODE","LATITUDE", "LONGITUDE")
+
+dataset_flights <- dataset_flights %>%
+  inner_join(tabela_lat_long, by = c("ORIGIN_AIRPORT" = "IATA_CODE"))
+
+```
+
+```{r}
+trajetoria_aeronave <- function(dataset_flights, tail_number) {
+  
+  voos_aeronave <- dataset_flights %>% 
+    filter(
+      !is.na(TAIL_NUMBER),
+      TAIL_NUMBER == tail_number
+    ) %>%
+    arrange(DATE, DEPARTURE_TIME) %>%
+    as_tibble()
+  
+  if (nrow(voos_aeronave) == 0) {
+    stop("Nenhum voo encontrado para o tail number: ", tail_number)
+  }
+  
+  # Cálculos e transformações
+  voos_aeronave <- voos_aeronave %>%
+    mutate(
+      HORA = sprintf("%04d", DEPARTURE_TIME),
+      HORA_FORMATADA = paste0(substr(HORA, 1, 2), ":", substr(HORA, 3, 4)),
+      DATETIME = as.POSIXct(paste(DATE, HORA_FORMATADA), format = "%Y-%m-%d %H:%M"),
+      VELOCIDADE_MEDIA = ifelse(ELAPSED_TIME > 0, 
+                               round(DISTANCE / (ELAPSED_TIME / 60), 1),
+                               NA_real_),
+      ESPESSURA_LINHA = case_when(
+        VELOCIDADE_MEDIA < 300 ~ 2,
+        VELOCIDADE_MEDIA < 400 ~ 3,
+        VELOCIDADE_MEDIA < 500 ~ 4,
+        TRUE ~ 5
+      ),
+      COR_VELOCIDADE = case_when(
+        VELOCIDADE_MEDIA < 300 ~ "#2ecc71",
+        VELOCIDADE_MEDIA < 400 ~ "#f39c12",
+        VELOCIDADE_MEDIA < 500 ~ "#e74c3c",
+        TRUE ~ "#9b59b6"
+      )
+    ) %>%
+    arrange(DATETIME)
+  
+  # Criar o mapa com trajeto temporal
+  mapa <- leaflet(voos_aeronave) %>%
+    addProviderTiles(providers$CartoDB.Positron) %>%
+    setView(lng = mean(voos_aeronave$LONGITUDE, na.rm = TRUE), 
+           lat = mean(voos_aeronave$LATITUDE, na.rm = TRUE), 
+           zoom = 4)
+  
+  # Adicionar as linhas do trajeto
+  for (i in 1:(nrow(voos_aeronave)-1)) {
+    if (!any(is.na(c(voos_aeronave$LONGITUDE[i], voos_aeronave$LATITUDE[i],
+                    voos_aeronave$LONGITUDE[i+1], voos_aeronave$LATITUDE[i+1])))) {
+      
+      mapa <- mapa %>%
+        addPolylines(
+          lng = c(voos_aeronave$LONGITUDE[i], voos_aeronave$LONGITUDE[i+1]),
+          lat = c(voos_aeronave$LATITUDE[i], voos_aeronave$LATITUDE[i+1]),
+          color = voos_aeronave$COR_VELOCIDADE[i],
+          weight = voos_aeronave$ESPESSURA_LINHA[i],
+          opacity = 0.8,
+          popup = paste(
+            "<div style='padding: 8px;'>",
+            "<b style='color: #2c3e50;'>Trajeto #", i, "</b><br>",
+            "<b>Voo:</b> ", voos_aeronave$FLIGHT_NUMBER[i], "<br>",
+            "<b>Data:</b> ", format(voos_aeronave$DATE[i], "%d/%m/%Y"), "<br>",
+            "<b>Hora:</b> ", voos_aeronave$HORA_FORMATADA[i], "<br>",
+            "<b>De:</b> ", voos_aeronave$ORIGIN_AIRPORT[i], " ’ ",
+            "<b>Para:</b> ", voos_aeronave$DESTINATION_AIRPORT[i], "<br>",
+            "<b>Velocidade:</b> <span style='color:", voos_aeronave$COR_VELOCIDADE[i], ";font-weight:bold;'>", 
+            voos_aeronave$VELOCIDADE_MEDIA[i], " mph</span><br>",
+            "<b>Distância:</b> ", voos_aeronave$DISTANCE[i], " milhas<br>",
+            "<b>Duração:</b> ", voos_aeronave$ELAPSED_TIME[i], " min",
+            "</div>"
+          ),
+          highlightOptions = highlightOptions(
+            weight = voos_aeronave$ESPESSURA_LINHA[i] + 2,
+            color = "black",
+            bringToFront = TRUE,
+            opacity = 1
+          )
+        )
+    }
+  }
+  
+  aeroportos_unicos <- voos_aeronave %>%
+    group_by(ORIGIN_AIRPORT, LONGITUDE, LATITUDE) %>%
+    summarise(
+      Total_Voos = n(),
+      .groups = 'drop'
+    )
+  
+  mapa <- mapa %>%
+    addCircleMarkers(
+      data = aeroportos_unicos,
+      lng = ~LONGITUDE,
+      lat = ~LATITUDE,
+      radius = 4, 
+      color = "black",  
+      fillColor = "white",
+      fillOpacity = 0.9, 
+      weight = 3,
+      opacity = 0.9,
+      popup = ~paste(
+        "<div style='padding: 6px;'>",
+        "<b>Aeroporto:</b> ", ORIGIN_AIRPORT, "<br>",
+        "<b>Total de voos:</b> ", Total_Voos,
+        "</div>"
+      ),
+
+    )
+  
+  # Adicionar legenda
+  mapa <- mapa %>%
+    addControl(
+      position = "bottomright",
+      html = paste0(
+        "<div style='background-color: rgba(255,255,255,0.95); padding: 10px; border-radius: 5px; font-size: 12px;'>",
+        "<h4 style='margin: 0 0 10px 0; color: #2c3e50;'>Velocidade (mph)</h4>",
+        "<div style='display: flex; align-items: center; margin: 5px 0;'>",
+        "<div style='width: 20px; height: 2px; background-color: #2ecc71; margin-right: 8px;'></div>",
+        "<span>< 300</span>",
+        "</div>",
+        "<div style='display: flex; align-items: center; margin: 5px 0;'>",
+        "<div style='width: 20px; height: 3px; background-color: #f39c12; margin-right: 8px;'></div>",
+        "<span>300-400</span>",
+        "</div>",
+        "<div style='display: flex; align-items: center; margin: 5px 0;'>",
+        "<div style='width: 20px; height: 4px; background-color: #e74c3c; margin-right: 8px;'></div>",
+        "<span>400-500</span>",
+        "</div>",
+        "<div style='display: flex; align-items: center; margin: 5px 0;'>",
+        "<div style='width: 20px; height: 5px; background-color: #9b59b6; margin-right: 8px;'></div>",
+        "<span>> 500</span>",
+        "</div>",
+        "<p style='margin-top: 8px; color: #7f8c8d; font-size: 11px;'>",
+        "" Pontos brancos: Aeroportos<br>",
+        "" Passe o mouse sobre as linhas",
+        "</p>",
+        "</div>"
+      )
+    ) %>%
+    addControl(
+      position = "topright",
+      html = paste0(
+        "<div style='background-color: rgba(255,255,255,0.95); padding: 10px; border-radius: 5px; font-size: 12px;'>",
+        "<h4 style='margin: 0 0 8px 0; color: #2c3e50;'>", tail_number, "</h4>",
+        "<p style='margin: 3px 0;'><b>Voos:</b> ", nrow(voos_aeronave), "</p>",
+        "<p style='margin: 3px 0;'><b>Período:</b> ", 
+        format(min(voos_aeronave$DATE), "%d/%m/%y"), " - ", 
+        format(max(voos_aeronave$DATE), "%d/%m/%y"), "</p>",
+        "<p style='margin: 3px 0;'><b>Vel. média:</b> ", 
+        round(mean(voos_aeronave$VELOCIDADE_MEDIA, na.rm = TRUE), 0), " mph</p>",
+        "<p style='margin: 3px 0;'><b>Distância total:</b> ", 
+        round(sum(voos_aeronave$DISTANCE, na.rm = TRUE)), " milhas</p>",
+        "</div>"
+      )
+    )
+ 
+  
+  # Criar mapa (o restante do seu código permanece igual)
+  # [...]
+  
+  return(list(
+    tabela = voos_aeronave %>% select(-HORA, -HORA_FORMATADA, -DATETIME),
+    mapa = mapa,
+    estatisticas = list(
+      total_voos = nrow(voos_aeronave),
+      velocidade_media = mean(voos_aeronave$VELOCIDADE_MEDIA, na.rm = TRUE),
+      distancia_total = sum(voos_aeronave$DISTANCE, na.rm = TRUE),
+      periodo = range(voos_aeronave$DATE),
+      aeroportos_visitados = nrow(aeroportos_unicos)
+    )
+  ))
+}
+
+```
+
+Exemplo de uso:
+
+resultado \<- trajetoria_aeronave(dataset_flights, "N431WN")

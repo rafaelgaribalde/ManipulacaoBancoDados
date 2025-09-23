@@ -1,0 +1,26 @@
+---
+title: "Desafio 01"
+format: html
+editor: visual
+---
+
+```{r}
+dados <- read.csv(unz("flights.csv.zip", "flights.csv"))
+dados
+```
+
+```{r}
+library(readr)
+library(vroom)
+dados <- read_csv(unz("flights.csv.zip", "flights.csv"))
+dados
+```
+
+```{r}
+install.packages("reticulate")
+library(reticulate)
+pd <- import("pandas")
+df <- pd$read_csv("flights.csv.zip")
+```
+
+O read_csv do pacote readr é o mais rapido, o read.csv da base do r o mais lento e o read_csv do python o intermediário
