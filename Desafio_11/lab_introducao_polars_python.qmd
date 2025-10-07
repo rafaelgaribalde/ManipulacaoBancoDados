@@ -1,0 +1,142 @@
+---
+title: "Laboratório: Introdução ao Polars"
+author: "Rafael Garibalde"
+date: "`r format(Sys.time(), '%d/%m/%Y %H:%M:%S')`"
+format: html
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{python}
+# Importa bibliotecas necessárias
+import polars as pl
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime
+
+# Mostra a data e hora da execução
+print("Arquivo compilado em:", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+```
+## 1.
+
+```{python}
+# Define os nomes das colunas
+nomes_colunas = [
+    "age", "workclass", "fnlwgt", "education", "education_num",
+    "marital_status", "occupation", "relationship", "race", "sex",
+    "capital_gain", "capital_loss", "hours_per_week", "native_country", "income"
+]
+
+# Importa o CSV sem cabeçalho
+renda = pl.read_csv("renda_adulta.csv.gz", has_header=False, new_columns=nomes_colunas, null_values="?")
+
+# Exibe as primeiras linhas
+renda.head()
+```
+
+
+
+## 2. Tipos de variáveis
+
+```{python}
+# Exibe o schema (tipos de dados das colunas)
+renda.schema
+```
+
+
+
+## 3. Dimensões da tabela
+
+```{python}
+# Número de linhas e colunas
+renda.shape
+```
+
+## 4. Contagem de classes salariais
+
+```{python}
+# Quantidade de pessoas por classe de renda
+renda.group_by("income").count()
+```
+
+
+
+## 5. Transformação para formato longo
+
+```{python}
+# Transforma capital_gain e capital_loss em formato longo
+renda_longo = renda.melt(
+    id_vars=[col for col in renda.columns if col not in ["capital_gain", "capital_loss"]],
+    value_vars=["capital_gain", "capital_loss"],
+    variable_name="tipo",
+    value_name="Valor"
+)
+
+renda_longo.head()
+```
+
+
+
+## 6. Média de horas trabalhadas por classe salarial
+
+```{python}
+renda.group_by("income").agg(
+    pl.col("hours_per_week").mean().alias("media_horas")
+)
+```
+
+
+
+## 7. Quantidade de pessoas por profissão
+
+```{python}
+renda.group_by("occupation").count().sort("count", descending=True)
+```
+
+
+
+## 8. Gráfico: média de horas por classe salarial
+
+```{python}
+# Calcula a média de horas por classe
+media_horas = renda.group_by("income").agg(
+    pl.col("hours_per_week").mean().alias("media_horas")
+).to_pandas()
+
+# Gráfico com seaborn
+sns.barplot(data=media_horas, x="income", y="media_horas")
+plt.title("Média de horas semanais por classe salarial")
+plt.xlabel("Classe Salarial")
+plt.ylabel("Horas Médias Trabalhadas")
+plt.show()
+```
+
+
+
+## 9. Desafio: diferenças salariais por gênero
+
+```{python}
+# Calcula proporção de pessoas com renda >50k por gênero
+discriminacao = (
+    renda.group_by(["sex", "income"])
+    .count()
+    .with_columns([
+        (pl.col("count") / pl.col("count").sum().over("sex") * 100).alias("percentual")
+    ])
+)
+
+discriminacao
+```
+
+
+
+## 10. Registro da compilação
+
+```{python}
+from datetime import datetime
+print("Relatório compilado em:", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+```
+
+
