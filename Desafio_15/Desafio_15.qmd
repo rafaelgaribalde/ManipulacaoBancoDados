@@ -1,0 +1,118 @@
+---
+title: "Desafio_15"
+author: "Rafael Garibalde"
+format: pdf
+editor: visual
+---
+
+```{r}
+Sys.setenv(JULIA_HOME = "C:/Users/Rafael/AppData/Local/Programs/Julia-1.12.1/bin")
+julia_setup()
+```
+  
+```{julia}
+  import Pkg
+Pkg.add("DataFrames")
+Pkg.add("CSV")          
+Pkg.add("RCall")  
+Pkg.add("BenchmarkTools")
+``` 
+
+
+```{julia}
+# PARÂMETROS E BIBLIOTECAS
+using Dates
+
+agora = Dates.now()
+println("Arquivo compilado em: ", Dates.format(agora, "dd/MM/yyyy HH:mm:ss"))
+
+# BIBLIOTECAS
+
+using BenchmarkTools
+using Printf
+
+println("======================================")
+println("   Série vs Execução Concorrente (async)")
+println("======================================")
+
+# FUNÇÃO "UM POUCO MAIS DEMORADA"
+
+# Agora fazemos ~400.000 operações por tarefa
+# Isso dobra o tempo e deixa as diferenças mais perceptíveis.
+#
+# Continua leve o suficiente para rodar no JuliaCall.
+function trabalho_medio(x)
+    s = 0.0
+    for i in 1:400_000        # <-- aumentado (era 200k)
+        s += sqrt(i) * sin(x) * cos(i)
+    end
+    return s
+end
+
+# EXECUÇÃO EM SÉRIE
+
+# Aqui cada tarefa é executada uma após a outra.
+# Julia NÃO inicia a próxima até terminar a anterior.
+function serie()
+    map(trabalho_medio, 1:20)
+end
+
+
+# EXECUÇÃO CONCORRENTE COM @sync E @async
+
+# @async cria várias tarefas independentes.
+# @sync espera todas terminarem.
+# NÃO são threads. NÃO são processos.
+# São tarefas concorrentes controladas pelo scheduler da Julia.
+#
+# Isso reduz tempo total porque Julia alterna execução entre tarefas.
+function concorrente()
+    resultados = Vector{Float64}(undef, 20)
+
+    # @sync → espera todas as @async terminarem
+    @sync for i in 1:20
+
+        # @async → inicia a tarefa e NÃO espera ela terminar
+        @async resultados[i] = trabalho_medio(i)
+    end
+
+    return resultados
+end
+
+
+# MEDIÇÃO DOS TEMPOS
+
+tempo_serie       = @belapsed serie()
+tempo_concorrente = @belapsed concorrente()
+
+# Fator de melhora
+fator = tempo_serie / tempo_concorrente
+
+
+# SAÍDA VISUAL
+
+println("======================================")
+println("            RESULTADOS")
+println("======================================")
+@printf("Tempo em série:          %.4f s\n", tempo_serie)
+@printf("Tempo concorrente:       %.4f s\n", tempo_concorrente)
+println("--------------------------------------")
+@printf("Concorrente ficou %.2f× mais rápido\n", fator)
+println("--------------------------------------")
+
+if tempo_concorrente < tempo_serie
+    println("➡ A execução CONCORRENTE foi mais rápida.")
+else
+    println("➡ A execução SÉRIE foi mais rápida.")
+end
+
+println("======================================")
+
+using Dates
+
+agora = Dates.now()
+println("Relatório compilado em: ", Dates.format(agora, "dd/MM/yyyy HH:mm:ss"))
+```
+
+
+
